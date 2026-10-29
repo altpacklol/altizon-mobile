@@ -5,6 +5,7 @@ import android.content.Context;
 import android.os.Bundle;
 import android.text.InputType;
 import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
@@ -14,11 +15,7 @@ import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
 
 /**
- * NativeActivity plus a text bridge: an invisible view takes the soft
- * keyboard's text (any script, not only what maps to key codes) and hands it
- * to the game (libhorizon's nativeText/nativeKey). The game calls
- * showKeyboard while a text field has focus. The window draws under the
- * display cutout.
+ * NativeActivity plus a text bridge and mouse pointer capture for FPS controls.
  */
 public class HorizonActivity extends NativeActivity {
     static {
@@ -42,6 +39,24 @@ public class HorizonActivity extends NativeActivity {
         sink = new TextSink(this);
         addContentView(sink, new ViewGroup.LayoutParams(1, 1));
     }
+
+    // === Захват мыши для управления камерой ===
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus && android.os.Build.VERSION.SDK_INT >= 26) {
+            getWindow().getDecorView().requestPointerCapture();
+        }
+    }
+
+    @Override
+    public boolean onTouchEvent(MotionEvent event) {
+        if (android.os.Build.VERSION.SDK_INT >= 26 && !getWindow().getDecorView().hasPointerCapture()) {
+            getWindow().getDecorView().requestPointerCapture();
+        }
+        return super.onTouchEvent(event);
+    }
+    // ===========================================
 
     /** Called from the game thread: the profile screen (name, skin). */
     public void openProfile() {
@@ -101,65 +116,64 @@ public class HorizonActivity extends NativeActivity {
     }
 
     static class Connection extends BaseInputConnection {
-                private String composing = "";
+        private String composing = "";
 
-                Connection(View view) {
-                    super(view, false);
-                }
+        Connection(View view) {
+            super(view, false);
+        }
 
-                @Override
-                public boolean commitText(CharSequence text, int pos) {
-                    composing = "";
-                    if (text.length() > 0) nativeText(text.toString());
-                    return true;
-                }
+        @Override
+        public commitText(CharSequence text, int pos) {
+            composing = "";
+            if (text.length() > 0) nativeText(text.toString());
+            return true;
+        }
 
-                @Override
-                public boolean setComposingText(CharSequence text, int pos) {
-                    String t = text.toString();
-                    // Compose by sending the difference: deletes then the new tail.
-                    int common = 0;
-                    while (common < t.length() && common < composing.length()
-                            && t.charAt(common) == composing.charAt(common)) common++;
-                    for (int i = common; i < composing.length(); i++) nativeKey(1);
-                    if (common < t.length()) nativeText(t.substring(common));
-                    composing = t;
-                    return true;
-                }
+        @Override
+        public boolean setComposingText(CharSequence text, int pos) {
+            String t = text.toString();
+            int common = 0;
+            while (common < t.length() && common < composing.length()
+                    && t.charAt(common) == composing.charAt(common)) common++;
+            for (int i = common; i < composing.length(); i++) nativeKey(1);
+            if (common < t.length()) nativeText(t.substring(common));
+            composing = t;
+            return true;
+        }
 
-                @Override
-                public boolean finishComposingText() {
-                    composing = "";
-                    return true;
-                }
+        @Override
+        public boolean finishComposingText() {
+            composing = "";
+            return true;
+        }
 
-                @Override
-                public boolean deleteSurroundingText(int before, int after) {
-                    for (int i = 0; i < before; i++) nativeKey(1);
-                    return true;
-                }
+        @Override
+        public boolean deleteSurroundingText(int before, int after) {
+            for (int i = 0; i < before; i++) nativeKey(1);
+            return true;
+        }
 
-                @Override
-                public boolean performEditorAction(int action) {
-                    composing = "";
+        @Override
+        public boolean performEditorAction(int action) {
+            composing = "";
+            nativeKey(2);
+            return true;
+        }
+
+        @Override
+        public boolean sendKeyEvent(KeyEvent e) {
+            if (e.getAction() == KeyEvent.ACTION_DOWN) {
+                int code = e.getKeyCode();
+                if (code == KeyEvent.KEYCODE_DEL) {
+                    nativeKey(1);
+                } else if (code == KeyEvent.KEYCODE_ENTER) {
                     nativeKey(2);
-                    return true;
+                } else {
+                    int ch = e.getUnicodeChar();
+                    if (ch != 0) nativeText(new String(Character.toChars(ch)));
                 }
-
-                @Override
-                public boolean sendKeyEvent(KeyEvent e) {
-                    if (e.getAction() == KeyEvent.ACTION_DOWN) {
-                        int code = e.getKeyCode();
-                        if (code == KeyEvent.KEYCODE_DEL) {
-                            nativeKey(1);
-                        } else if (code == KeyEvent.KEYCODE_ENTER) {
-                            nativeKey(2);
-                        } else {
-                            int ch = e.getUnicodeChar();
-                            if (ch != 0) nativeText(new String(Character.toChars(ch)));
-                        }
-                    }
-                    return true;
-                }
+            }
+            return true;
+        }
     }
 }
