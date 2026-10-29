@@ -59,6 +59,34 @@ public class HorizonActivity extends NativeActivity {
         }
         sink = new TextSink(this);
         addContentView(sink, new ViewGroup.LayoutParams(1, 1));
+
+        if (android.os.Build.VERSION.SDK_INT >= 26) {
+            View.OnCapturedPointerListener pointerListener = new View.OnCapturedPointerListener() {
+                @Override
+                public boolean onCapturedPointer(View view, MotionEvent event) {
+                    int action = event.getActionMasked();
+                    if (action == MotionEvent.ACTION_MOVE) {
+                        float dx = event.getX();
+                        float dy = event.getY();
+                        if (dx == 0 && dy == 0) {
+                            dx = event.getAxisValue(MotionEvent.AXIS_RELATIVE_X);
+                            dy = event.getAxisValue(MotionEvent.AXIS_RELATIVE_Y);
+                        }
+                        if (dx != 0 || dy != 0) {
+                            nativeCapturedMouseMove(dx, dy);
+                        }
+                        return true;
+                    }
+                    return false;
+                }
+            };
+
+            View decor = getWindow() != null ? getWindow().getDecorView() : null;
+            if (decor != null) {
+                decor.setOnCapturedPointerListener(pointerListener);
+            }
+            sink.setOnCapturedPointerListener(pointerListener);
+        }
     }
 
     @Override
@@ -66,8 +94,11 @@ public class HorizonActivity extends NativeActivity {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus) {
             hideSystemUi();
-            if (wantsCapture && android.os.Build.VERSION.SDK_INT >= 26 && getWindow() != null && getWindow().getDecorView() != null) {
-                getWindow().getDecorView().requestPointerCapture();
+            if (wantsCapture && android.os.Build.VERSION.SDK_INT >= 26) {
+                View decor = getWindow() != null ? getWindow().getDecorView() : null;
+                if (decor != null && !decor.hasPointerCapture()) {
+                    decor.requestPointerCapture();
+                }
             }
         }
     }
@@ -82,9 +113,13 @@ public class HorizonActivity extends NativeActivity {
                     View decor = getWindow() != null ? getWindow().getDecorView() : null;
                     if (decor != null) {
                         if (capture) {
-                            decor.requestPointerCapture();
+                            if (!decor.hasPointerCapture()) {
+                                decor.requestPointerCapture();
+                            }
                         } else {
-                            decor.releasePointerCapture();
+                            if (decor.hasPointerCapture()) {
+                                decor.releasePointerCapture();
+                            }
                         }
                     }
                 }
@@ -93,31 +128,25 @@ public class HorizonActivity extends NativeActivity {
     }
 
     @Override
-    public boolean onCapturedPointerEvent(MotionEvent event) {
-        int action = event.getActionMasked();
-        if (action == MotionEvent.ACTION_MOVE) {
-            float dx = event.getX();
-            float dy = event.getY();
-            if (dx == 0 && dy == 0 && android.os.Build.VERSION.SDK_INT >= 26) {
-                dx = event.getAxisValue(MotionEvent.AXIS_RELATIVE_X);
-                dy = event.getAxisValue(MotionEvent.AXIS_RELATIVE_Y);
+    public boolean dispatchTouchEvent(MotionEvent event) {
+        if (wantsCapture && android.os.Build.VERSION.SDK_INT >= 26) {
+            View decor = getWindow() != null ? getWindow().getDecorView() : null;
+            if (decor != null && !decor.hasPointerCapture()) {
+                decor.requestPointerCapture();
             }
-            if (dx != 0 || dy != 0) {
-                nativeCapturedMouseMove(dx, dy);
-            }
-            return true;
         }
-        return super.onCapturedPointerEvent(event);
+        return super.dispatchTouchEvent(event);
     }
 
     @Override
-    public boolean onTouchEvent(MotionEvent event) {
-        if (wantsCapture && android.os.Build.VERSION.SDK_INT >= 26 && getWindow() != null && getWindow().getDecorView() != null) {
-            if (!getWindow().getDecorView().hasPointerCapture()) {
-                getWindow().getDecorView().requestPointerCapture();
+    public boolean dispatchGenericMotionEvent(MotionEvent event) {
+        if (wantsCapture && android.os.Build.VERSION.SDK_INT >= 26) {
+            View decor = getWindow() != null ? getWindow().getDecorView() : null;
+            if (decor != null && !decor.hasPointerCapture()) {
+                decor.requestPointerCapture();
             }
         }
-        return super.onTouchEvent(event);
+        return super.dispatchGenericMotionEvent(event);
     }
 
     /** Called from the game thread: the profile screen (name, skin). */

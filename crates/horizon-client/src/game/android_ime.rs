@@ -1,4 +1,4 @@
-﻿//! The soft keyboard on Android (packaging/android/java/.../HorizonActivity.java):
+//! The soft keyboard on Android (packaging/android/java/.../HorizonActivity.java):
 //! the Java side's invisible text view hands typed text and keys to
 //! `nativeText`/`nativeKey`, which queue them for the game thread; the game
 //! asks for the keyboard with `show`.
@@ -81,7 +81,6 @@ pub(super) fn open_profile() {
         log::warn!("Horizon: profile screen: {e}");
     }
 }
-
 
 static MOUSE_DELTA_X: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
 static MOUSE_DELTA_Y: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);

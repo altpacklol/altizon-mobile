@@ -1,4 +1,4 @@
-﻿//! The playable game loop: streaming world, player simulation at 20 ticks/s,
+//! The playable game loop: streaming world, player simulation at 20 ticks/s,
 //! block interaction, inventory and HUD.
 mod advancements;
 mod advancements_screen;
@@ -5595,7 +5595,7 @@ impl Game<'_> {
         let time = self.started.elapsed().as_secs_f64();
         let pointer = self.captured || self.agent_pointer;
         let grabbed = pointer && self.screen == Screen::Playing && self.player.is_some();
-        let active = self.focused || self.agent_pointer;
+        let active = if cfg!(target_os = "android") { true } else { self.focused || self.agent_pointer };
         if let Some((xo, yo)) = self
             .mouse
             .handle_accumulated_movement(time, active, grabbed, look)
@@ -5646,6 +5646,7 @@ impl Game<'_> {
             return;
         }
         // MouseHandler.grabMouse never captures an inactive window.
+        #[cfg(not(target_os = "android"))]
         if capture && !self.focused {
             return;
         }
@@ -12618,16 +12619,6 @@ impl ApplicationHandler for Game<'_> {
                 return;
             }
         }
-                #[cfg(target_os = "android")]
-        if matches!(
-            &event,
-            WindowEvent::KeyboardInput { .. }
-                | WindowEvent::MouseInput { .. }
-                | WindowEvent::MouseWheel { .. }
-                | WindowEvent::CursorMoved { .. }
-        ) {
-            touch::set_kbm_active(true);
-        }
         if matches!(
             event,
             WindowEvent::KeyboardInput { .. }
@@ -12635,6 +12626,8 @@ impl ApplicationHandler for Game<'_> {
                 | WindowEvent::MouseWheel { .. }
                 | WindowEvent::CursorMoved { .. }
         ) {
+            #[cfg(target_os = "android")]
+            touch::set_kbm_active(true);
             self.last_input = Instant::now();
         }
         if (self.pending_entry.is_some() || self.world_loader.is_some())
@@ -12749,7 +12742,7 @@ impl ApplicationHandler for Game<'_> {
                                 let dx = (curr_x - prev_x) as f64;
                                 let dy = (curr_y - prev_y) as f64;
                                 if dx.abs() < 400.0 && dy.abs() < 400.0 {
-                                    self.mouse.add_motion(dx, dy);
+                                    self.mouse.on_move(0.0, 0.0, dx, dy, true, true);
                                     self.last_input = std::time::Instant::now();
                                 }
                             }
