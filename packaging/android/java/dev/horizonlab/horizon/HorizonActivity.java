@@ -123,7 +123,7 @@ public class HorizonActivity extends NativeActivity {
         }
 
         @Override
-        public commitText(CharSequence text, int pos) {
+        public boolean  commitText(CharSequence text, int pos) {
             composing = "";
             if (text.length() > 0) nativeText(text.toString());
             return true;
