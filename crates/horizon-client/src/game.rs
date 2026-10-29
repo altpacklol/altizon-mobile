@@ -12710,6 +12710,32 @@ impl ApplicationHandler for Game<'_> {
                     }
                 }
                 WindowEvent::CursorMoved { position, .. } => {
+                    #[cfg(target_os = "android")]
+                    {
+                        use std::sync::atomic::{AtomicI64, Ordering};
+                        static LAST_X: AtomicI64 = AtomicI64::new(i64::MIN);
+                        static LAST_Y: AtomicI64 = AtomicI64::new(i64::MIN);
+
+                        if self.captured && self.screen == Screen::Playing && self.player.is_some() {
+                            let curr_x = position.x as i64;
+                            let curr_y = position.y as i64;
+                            let prev_x = LAST_X.swap(curr_x, Ordering::Relaxed);
+                            let prev_y = LAST_Y.swap(curr_y, Ordering::Relaxed);
+
+                            if prev_x != i64::MIN && prev_y != i64::MIN {
+                                let dx = (curr_x - prev_x) as f64;
+                                let dy = (curr_y - prev_y) as f64;
+                                if dx.abs() < 400.0 && dy.abs() < 400.0 {
+                                    self.mouse.on_move(0.0, 0.0, dx, dy, true, true);
+                                    self.last_input = std::time::Instant::now();
+                                }
+                            }
+                        } else {
+                            LAST_X.store(i64::MIN, Ordering::Relaxed);
+                            LAST_Y.store(i64::MIN, Ordering::Relaxed);
+                        }
+                    }
+
                     if let Some(r) = &self.renderer {
                         let b = HudBatch::new([r.config.width, r.config.height]);
                         self.cursor = (position.x as f32 / b.scale, position.y as f32 / b.scale);
