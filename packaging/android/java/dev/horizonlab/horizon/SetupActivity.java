@@ -20,7 +20,6 @@ import java.io.File;
 /**
  * The launcher activity. Starts the game when the resources are ready; otherwise shows the
  * first-run screen that downloads and prepares the game files on the phone (android_setup.rs).
- * The derived pack comes from the build's HORIZON_DERIVED_URL or files/horizon-derived.zip.
  */
 public class SetupActivity extends Activity
         implements View.OnClickListener, DialogInterface.OnClickListener, Runnable {
@@ -34,11 +33,12 @@ public class SetupActivity extends Activity
     static native String nativeStatus();
 
     private static final long NEED_BYTES = 1500L * 1024 * 1024;
+    private static final String APP_VERSION = "0.2.5 (26.3)";
 
     private String home;
     private TextView stage, detail, note;
     private Ui.Bar bar;
-    private Button button, profile;
+    private Button button, profile, btnForce, btnClear;
     private final Handler handler = new Handler();
     private long lastBytes = -1, lastTime;
     private double speed;
@@ -50,42 +50,101 @@ public class SetupActivity extends Activity
         return dir.getAbsolutePath();
     }
 
+    private void hideSystemUi() {
+        try {
+            if (getWindow() != null && getWindow().getDecorView() != null) {
+                getWindow().getDecorView().setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_FULLSCREEN
+                );
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
     /** Whether the derived pack can be found (a build URL or the local zip). */
     private boolean haveDerived() {
         return !nativeDefaultUrl().isEmpty() || new File(home, "horizon-derived.zip").isFile();
     }
 
+    private boolean checkAndPrepareResources() {
+        File res = new File(home, "resources");
+        boolean readyInRes = new File(res, "horizon-resources.json").isFile()
+                && new File(res, "facts.json").isFile();
+        boolean readyInHome = new File(home, "horizon-resources.json").isFile()
+                && new File(home, "facts.json").isFile();
+
+        if (readyInHome && !readyInRes) {
+            res.mkdirs();
+            new File(home, "horizon-resources.json").renameTo(new File(res, "horizon-resources.json"));
+            new File(home, "facts.json").renameTo(new File(res, "facts.json"));
+            readyInRes = true;
+        }
+
+        if (readyInRes) {
+            File inc = new File(res, ".horizon-setup-incomplete");
+            if (inc.exists()) {
+                inc.delete();
+            }
+            return true;
+        }
+        return false;
+    }
+
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+        hideSystemUi();
         home = home(this);
-        if (nativeReady(home) == 1) {
+
+        if (nativeReady(home) == 1 || checkAndPrepareResources()) {
             launch();
             return;
         }
+
         LinearLayout card = Ui.card(this);
         card.addView(Ui.text(this, "Horizon", 30, Ui.TEXT, true));
+        card.addView(Ui.text(this, Ui.t("Версия: " + APP_VERSION, "Version: " + APP_VERSION), 13, Ui.MUTED, false));
         card.addView(Ui.text(this, Ui.t("Первый запуск", "First launch"), 15, Ui.MUTED, false));
         card.addView(Ui.text(this, Ui.t(
                 "Игре нужны файлы Minecraft 26.3. Они скачаются автоматически, около 700 МБ. Лучше подключиться к Wi-Fi.",
                 "The game needs the Minecraft 26.3 files. They will be downloaded automatically, about 700 MB. Wi-Fi is best."),
                 15, Ui.TEXT, false), Ui.gap(this, 12));
+
         note = Ui.text(this, "", 14, Ui.WARN, false);
         note.setVisibility(View.GONE);
         card.addView(note, Ui.gap(this, 8));
+
         button = Ui.button(this, Ui.t("Скачать файлы игры", "Download game files"), true);
         button.setOnClickListener(this);
         card.addView(button, Ui.gap(this, 18));
+
         bar = new Ui.Bar(this);
         bar.setVisibility(View.GONE);
         card.addView(bar, Ui.gap(this, 18));
+
         stage = Ui.text(this, "", 15, Ui.TEXT, true);
         card.addView(stage, Ui.gap(this, 6));
+
         detail = Ui.text(this, "", 13, Ui.MUTED, false);
         card.addView(detail);
+
+        btnForce = Ui.button(this, Ui.t("Принудительный запуск (пропустить)", "Force launch (skip download)"), false);
+        btnForce.setOnClickListener(this);
+        card.addView(btnForce, Ui.gap(this, 12));
+
+        btnClear = Ui.button(this, Ui.t("Очистить и сбросить загрузку", "Clear & reset download"), false);
+        btnClear.setOnClickListener(this);
+        card.addView(btnClear, Ui.gap(this, 10));
+
         profile = Ui.button(this, Ui.t("Профиль: ник и скин", "Profile: name and skin"), false);
         profile.setOnClickListener(this);
-        card.addView(profile, Ui.gap(this, 14));
+        card.addView(profile, Ui.gap(this, 10));
+
         if (!haveDerived()) {
             showNote(Ui.t(
                     "В этой сборке нет адреса пакета данных Horizon. Положите horizon-derived.zip в папку игры (Android/data/dev.horizonlab.horizon/files) или установите сборку, где он указан.",
@@ -99,6 +158,14 @@ public class SetupActivity extends Activity
         }
     }
 
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) {
+            hideSystemUi();
+        }
+    }
+
     private void showNote(String s) {
         note.setText(s);
         note.setVisibility(View.VISIBLE);
@@ -107,6 +174,12 @@ public class SetupActivity extends Activity
     public void onClick(View v) {
         if (v == profile) {
             startActivity(new Intent(this, ProfileActivity.class));
+        } else if (v == btnForce) {
+            File inc = new File(new File(home, "resources"), ".horizon-setup-incomplete");
+            if (inc.exists()) inc.delete();
+            launch();
+        } else if (v == btnClear) {
+            confirmClear();
         } else {
             confirm();
         }
@@ -114,6 +187,52 @@ public class SetupActivity extends Activity
 
     public void onClick(DialogInterface d, int w) {
         begin();
+    }
+
+    private void confirmClear() {
+        new AlertDialog.Builder(this)
+                .setTitle(Ui.t("Очистить файлы?", "Clear files?"))
+                .setMessage(Ui.t("Удалить временные и незавершенные файлы загрузки, чтобы начать заново?",
+                        "Delete temporary and incomplete download files to start fresh?"))
+                .setPositiveButton(Ui.t("Очистить", "Clear"), new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        clearFiles();
+                    }
+                })
+                .setNegativeButton(Ui.t("Отмена", "Cancel"), null)
+                .show();
+    }
+
+    private void deleteRecursive(File f) {
+        if (f == null || !f.exists()) return;
+        if (f.isDirectory()) {
+            File[] files = f.listFiles();
+            if (files != null) {
+                for (File child : files) {
+                    deleteRecursive(child);
+                }
+            }
+        }
+        f.delete();
+    }
+
+    private void clearFiles() {
+        try {
+            stopService(new Intent(this, SetupService.class));
+        } catch (Exception ignored) {}
+        deleteRecursive(new File(home, "resources"));
+        deleteRecursive(new File(home, "tmp"));
+        deleteRecursive(new File(home, ".horizon-setup-incomplete"));
+        new File(home, "resources").mkdirs();
+        bar.setVisibility(View.GONE);
+        bar.set(0);
+        stage.setText("");
+        detail.setText("");
+        button.setEnabled(true);
+        button.setAlpha(1.0f);
+        button.setText(Ui.t("Скачать файлы игры", "Download game files"));
+        showNote(Ui.t("Файлы очищены. Можно начать чистую установку.", "Files cleared. You can start fresh."));
     }
 
     private void confirm() {
