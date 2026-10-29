@@ -8,6 +8,7 @@ import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowManager;
 import android.view.inputmethod.BaseInputConnection;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
@@ -31,22 +32,39 @@ public class HorizonActivity extends NativeActivity {
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
-        Ui.hideSystemUi(this);
+        hideSystemUi();
+        if (android.os.Build.VERSION.SDK_INT >= 28) {
+            WindowManager.LayoutParams lp = getWindow().getAttributes();
+            lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            getWindow().setAttributes(lp);
+        }
         sink = new TextSink(this);
         addContentView(sink, new ViewGroup.LayoutParams(1, 1));
     }
 
-    @Override
-    protected void onResume() {
-        super.onResume();
-        Ui.hideSystemUi(this);
+    private void hideSystemUi() {
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            android.view.WindowInsetsController controller = getWindow().getInsetsController();
+            if (controller != null) {
+                controller.hide(android.view.WindowInsets.Type.navigationBars() | android.view.WindowInsets.Type.statusBars());
+                controller.setSystemBarsBehavior(android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            }
+        } else {
+            int flags = View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_FULLSCREEN;
+            getWindow().getDecorView().setSystemUiVisibility(flags);
+        }
     }
 
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus) {
-            Ui.hideSystemUi(this);
+            hideSystemUi();
             if (android.os.Build.VERSION.SDK_INT >= 26) {
                 getWindow().getDecorView().requestPointerCapture();
             }
@@ -82,18 +100,18 @@ public class HorizonActivity extends NativeActivity {
 
         public void run() {
             TextSink sink = a.sink;
-            if (sink == null) return;
-            InputMethodManager imm = (InputMethodManager) a.getSystemService(Context.INPUT_METHOD_SERVICE);
-            if (imm == null) return;
-            if (show) {
-                sink.setFocusable(true);
-                sink.setFocusableInTouchMode(true);
-                sink.requestFocus();
-                imm.restartInput(sink);
-                imm.showSoftInput(sink, InputMethodManager.SHOW_FORCED);
-            } else {
-                imm.hideSoftInputFromWindow(sink.getWindowToken(), 0);
-                sink.clearFocus();
+            {
+                InputMethodManager imm = (InputMethodManager) a.getSystemService(Context.INPUT_METHOD_SERVICE);
+                if (show) {
+                    sink.setFocusable(true);
+                    sink.setFocusableInTouchMode(true);
+                    sink.requestFocus();
+                    imm.restartInput(sink);
+                    imm.showSoftInput(sink, InputMethodManager.SHOW_FORCED);
+                } else {
+                    imm.hideSoftInputFromWindow(sink.getWindowToken(), 0);
+                    sink.clearFocus();
+                }
             }
         }
     }

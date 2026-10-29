@@ -23,16 +23,11 @@ rm -rf "$OUT/res" && mkdir -p "$OUT/res"
 "$BT/aapt2" link -o "$OUT/unaligned.apk" --manifest packaging/android/AndroidManifest.xml -I "$PLATFORM" \
   --min-sdk-version 26 --target-sdk-version 35 "$OUT/res/res.zip"
 python3 - "$OUT" <<'PY'
-import os, sys, zipfile
+import sys, zipfile
 out = sys.argv[1]
 with zipfile.ZipFile(f"{out}/unaligned.apk", "a", zipfile.ZIP_DEFLATED) as z:
     z.write(f"{out}/java/classes.dex", "classes.dex")
     z.write(f"{out}/stage/lib/arm64-v8a/libhorizon.so", "lib/arm64-v8a/libhorizon.so")
-    for asset_path in ["packaging/android/assets/horizon-derived.zip", "horizon-derived.zip"]:
-        if os.path.exists(asset_path):
-            print(f"Embedding {asset_path} into assets/horizon-derived.zip")
-            z.write(asset_path, "assets/horizon-derived.zip")
-            break
 PY
 "$BT/zipalign" -f -p 4 "$OUT/unaligned.apk" "$OUT/aligned.apk"
 if [ -n "${HORIZON_KEYSTORE:-}" ] && [ -f "$HORIZON_KEYSTORE" ]; then
