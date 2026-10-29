@@ -1,3 +1,12 @@
+﻿pub static KBM_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_kbm_active(active: bool) {
+    KBM_ACTIVE.store(active, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn is_kbm_active() -> bool {
+    KBM_ACTIVE.load(std::sync::atomic::Ordering::Relaxed)
+}
 //! Touch controls (Android; ANDROID.md), laid out like Bedrock Edition's.
 //!
 //! In menus a finger is the mouse (down = left click, moving drags). In the
@@ -426,8 +435,7 @@ impl Game<'_> {
         Some((Gui { w: batch.width, h: batch.height }, batch.scale))
     }
 
-    fn touch_controls_shown(&self) -> bool {
-        cfg!(target_os = "android") && self.player.is_some() && !self.pad_in_menu()
+    fn touch_controls_shown(&self) -> bool {`n        cfg!(target_os = "android") && self.player.is_some() && !self.pad_in_menu() && !is_kbm_active()
     }
 
     /// Over a screen in the world (inventory, containers, pause, chat...):
@@ -437,8 +445,7 @@ impl Game<'_> {
             && self.player.is_some()
             && self.title.is_none()
             && self.pad_in_menu()
-            && !self.touch_text_focused()
-    }
+            && !self.touch_text_focused() && !is_kbm_active()`n    }
 
     /// On the title or pause screen: the profile button.
     fn touch_profile_shown(&self) -> bool {

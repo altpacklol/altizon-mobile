@@ -1,4 +1,4 @@
-//! The playable game loop: streaming world, player simulation at 20 ticks/s,
+﻿//! The playable game loop: streaming world, player simulation at 20 ticks/s,
 //! block interaction, inventory and HUD.
 mod advancements;
 mod advancements_screen;
@@ -5583,6 +5583,14 @@ impl Game<'_> {
     /// An agent moving the mouse (`mouse-move`) counts as a grabbed pointer in
     /// an active window, as it cannot grab the real one.
     fn apply_mouse_look(&mut self) {
+        #[cfg(target_os = "android")]
+        {
+            let (mdx, mdy) = android_ime::take_mouse_delta();
+            if mdx != 0.0 || mdy != 0.0 {
+                self.mouse.add_motion(mdx, mdy);
+                self.last_input = Instant::now();
+            }
+        }
         let look = self.look_options();
         let time = self.started.elapsed().as_secs_f64();
         let pointer = self.captured || self.agent_pointer;
@@ -5678,6 +5686,7 @@ impl Game<'_> {
             #[cfg(target_os = "android")]
             {
                 self.captured = true;
+                android_ime::set_pointer_capture(true);
             }
             #[cfg(not(target_os = "macos"))]
             if self.captured && self.focused {
@@ -5694,6 +5703,8 @@ impl Game<'_> {
                     warp(window);
                 }
                 let _ = window.set_cursor_grab(CursorGrabMode::None);
+                #[cfg(target_os = "android")]
+                android_ime::set_pointer_capture(false);
                 if self.focused {
                     warp(window);
                 }
@@ -12557,6 +12568,8 @@ impl ApplicationHandler for Game<'_> {
             return;
         }
         if let WindowEvent::Touch(touch) = &event {
+            #[cfg(target_os = "android")]
+            touch::set_kbm_active(false);
             self.touch_event(event_loop, *touch);
             return;
         }
@@ -12604,6 +12617,16 @@ impl ApplicationHandler for Game<'_> {
             if self.debug_key(key, action) {
                 return;
             }
+        }
+                #[cfg(target_os = "android")]
+        if matches!(
+            &event,
+            WindowEvent::KeyboardInput { .. }
+                | WindowEvent::MouseInput { .. }
+                | WindowEvent::MouseWheel { .. }
+                | WindowEvent::CursorMoved { .. }
+        ) {
+            touch::set_kbm_active(true);
         }
         if matches!(
             event,
@@ -12726,7 +12749,7 @@ impl ApplicationHandler for Game<'_> {
                                 let dx = (curr_x - prev_x) as f64;
                                 let dy = (curr_y - prev_y) as f64;
                                 if dx.abs() < 400.0 && dy.abs() < 400.0 {
-                                    self.mouse.on_move(0.0, 0.0, dx, dy, true, true);
+                                    self.mouse.add_motion(dx, dy);
                                     self.last_input = std::time::Instant::now();
                                 }
                             }

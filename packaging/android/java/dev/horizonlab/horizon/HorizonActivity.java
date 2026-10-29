@@ -16,7 +16,7 @@ import android.view.inputmethod.InputMethodManager;
 
 /**
  * NativeActivity plus a text bridge, mouse pointer capture for FPS controls,
- * and full-screen sticky immersive mode to prevent accidental navigation gestures.
+ * and full-screen sticky immersive mode.
  */
 public class HorizonActivity extends NativeActivity {
     static {
@@ -26,8 +26,27 @@ public class HorizonActivity extends NativeActivity {
     static native void nativeText(String text);
     /** 1 = backspace, 2 = enter. */
     static native void nativeKey(int key);
+    /** Relative mouse movement when pointer is captured. */
+    static native void nativeCapturedMouseMove(float dx, float dy);
 
     private TextSink sink;
+    private boolean wantsCapture = true;
+
+    private void hideSystemUi() {
+        try {
+            if (getWindow() != null && getWindow().getDecorView() != null) {
+                getWindow().getDecorView().setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_FULLSCREEN
+                );
+            }
+        } catch (Exception ignored) {
+        }
+    }
 
     @Override
     protected void onCreate(Bundle state) {
@@ -42,39 +61,61 @@ public class HorizonActivity extends NativeActivity {
         addContentView(sink, new ViewGroup.LayoutParams(1, 1));
     }
 
-    private void hideSystemUi() {
-        if (android.os.Build.VERSION.SDK_INT >= 30) {
-            android.view.WindowInsetsController controller = getWindow().getInsetsController();
-            if (controller != null) {
-                controller.hide(android.view.WindowInsets.Type.navigationBars() | android.view.WindowInsets.Type.statusBars());
-                controller.setSystemBarsBehavior(android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
-            }
-        } else {
-            int flags = View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                    | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                    | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                    | View.SYSTEM_UI_FLAG_FULLSCREEN;
-            getWindow().getDecorView().setSystemUiVisibility(flags);
-        }
-    }
-
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus) {
             hideSystemUi();
-            if (android.os.Build.VERSION.SDK_INT >= 26) {
+            if (wantsCapture && android.os.Build.VERSION.SDK_INT >= 26 && getWindow() != null && getWindow().getDecorView() != null) {
                 getWindow().getDecorView().requestPointerCapture();
             }
         }
     }
 
+    /** Called from Rust: dynamically acquire or release pointer capture */
+    public void setPointerCaptureState(final boolean capture) {
+        this.wantsCapture = capture;
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (android.os.Build.VERSION.SDK_INT >= 26) {
+                    View decor = getWindow() != null ? getWindow().getDecorView() : null;
+                    if (decor != null) {
+                        if (capture) {
+                            decor.requestPointerCapture();
+                        } else {
+                            decor.releasePointerCapture();
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    @Override
+    public boolean onCapturedPointerEvent(MotionEvent event) {
+        int action = event.getActionMasked();
+        if (action == MotionEvent.ACTION_MOVE) {
+            float dx = event.getX();
+            float dy = event.getY();
+            if (dx == 0 && dy == 0 && android.os.Build.VERSION.SDK_INT >= 26) {
+                dx = event.getAxisValue(MotionEvent.AXIS_RELATIVE_X);
+                dy = event.getAxisValue(MotionEvent.AXIS_RELATIVE_Y);
+            }
+            if (dx != 0 || dy != 0) {
+                nativeCapturedMouseMove(dx, dy);
+            }
+            return true;
+        }
+        return super.onCapturedPointerEvent(event);
+    }
+
     @Override
     public boolean onTouchEvent(MotionEvent event) {
-        if (android.os.Build.VERSION.SDK_INT >= 26 && !getWindow().getDecorView().hasPointerCapture()) {
-            getWindow().getDecorView().requestPointerCapture();
+        if (wantsCapture && android.os.Build.VERSION.SDK_INT >= 26 && getWindow() != null && getWindow().getDecorView() != null) {
+            if (!getWindow().getDecorView().hasPointerCapture()) {
+                getWindow().getDecorView().requestPointerCapture();
+            }
         }
         return super.onTouchEvent(event);
     }
@@ -100,18 +141,18 @@ public class HorizonActivity extends NativeActivity {
 
         public void run() {
             TextSink sink = a.sink;
-            {
-                InputMethodManager imm = (InputMethodManager) a.getSystemService(Context.INPUT_METHOD_SERVICE);
-                if (show) {
-                    sink.setFocusable(true);
-                    sink.setFocusableInTouchMode(true);
-                    sink.requestFocus();
-                    imm.restartInput(sink);
-                    imm.showSoftInput(sink, InputMethodManager.SHOW_FORCED);
-                } else {
-                    imm.hideSoftInputFromWindow(sink.getWindowToken(), 0);
-                    sink.clearFocus();
-                }
+            if (sink == null) return;
+            InputMethodManager imm = (InputMethodManager) a.getSystemService(Context.INPUT_METHOD_SERVICE);
+            if (imm == null) return;
+            if (show) {
+                sink.setFocusable(true);
+                sink.setFocusableInTouchMode(true);
+                sink.requestFocus();
+                imm.restartInput(sink);
+                imm.showSoftInput(sink, InputMethodManager.SHOW_FORCED);
+            } else {
+                imm.hideSoftInputFromWindow(sink.getWindowToken(), 0);
+                sink.clearFocus();
             }
         }
     }
