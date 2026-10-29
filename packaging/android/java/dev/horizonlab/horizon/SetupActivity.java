@@ -16,11 +16,14 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 /**
- * The launcher activity. Starts the game when the resources are ready; otherwise shows the
- * first-run screen that downloads and prepares the game files on the phone (android_setup.rs).
- * The derived pack comes from the build's HORIZON_DERIVED_URL or files/horizon-derived.zip.
+ * Main Launcher & Resource Setup Activity for Horizon (Minecraft 26.3).
  */
 public class SetupActivity extends Activity
         implements View.OnClickListener, DialogInterface.OnClickListener, Runnable {
@@ -34,11 +37,12 @@ public class SetupActivity extends Activity
     static native String nativeStatus();
 
     private static final long NEED_BYTES = 1500L * 1024 * 1024;
+    private static final String APP_VERSION = "0.2.5 (26.3)";
 
     private String home;
-    private TextView stage, detail, note;
+    private TextView stage, detail, note, statusText;
     private Ui.Bar bar;
-    private Button button, profile;
+    private Button btnPlay, btnDownload, btnUnpackDerived, btnProfile, btnForce;
     private final Handler handler = new Handler();
     private long lastBytes = -1, lastTime;
     private double speed;
@@ -47,50 +51,107 @@ public class SetupActivity extends Activity
         File dir = c.getExternalFilesDir(null);
         if (dir == null) dir = c.getFilesDir();
         dir.mkdirs();
+        // Also ensure horizon-mods folder exists for users
+        new File(dir, "horizon-mods").mkdirs();
         return dir.getAbsolutePath();
     }
 
-    /** Whether the derived pack can be found (a build URL or the local zip). */
-    private boolean haveDerived() {
-        return !nativeDefaultUrl().isEmpty() || new File(home, "horizon-derived.zip").isFile();
+    /** Extracts embedded horizon-derived.zip from APK assets if not yet extracted. */
+    private void extractEmbeddedDerived() {
+        File target = new File(home, "horizon-derived.zip");
+        if (target.exists() && target.length() > 0) return;
+        try (InputStream in = getAssets().open("horizon-derived.zip");
+             FileOutputStream out = new FileOutputStream(target)) {
+            byte[] buf = new byte[65536];
+            int n;
+            while ((n = in.read(buf)) > 0) {
+                out.write(buf, 0, n);
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    private boolean isReady() {
+        File res = new File(home, "resources");
+        boolean readyInRes = new File(res, "horizon-resources.json").isFile()
+                && new File(res, "facts.json").isFile();
+        boolean readyInHome = new File(home, "horizon-resources.json").isFile()
+                && new File(home, "facts.json").isFile();
+
+        if (readyInHome && !readyInRes) {
+            res.mkdirs();
+            new File(home, "horizon-resources.json").renameTo(new File(res, "horizon-resources.json"));
+            new File(home, "facts.json").renameTo(new File(res, "facts.json"));
+            readyInRes = true;
+        }
+
+        return readyInRes || nativeReady(home) == 1;
+    }
+
+    private void clearIncompleteFlag() {
+        File inc = new File(new File(home, "resources"), ".horizon-setup-incomplete");
+        if (inc.exists()) inc.delete();
     }
 
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+        Ui.hideSystemUi(this);
         home = home(this);
-        if (nativeReady(home) == 1) {
-            launch();
-            return;
-        }
+        extractEmbeddedDerived();
+
         LinearLayout card = Ui.card(this);
-        card.addView(Ui.text(this, "Horizon", 30, Ui.TEXT, true));
-        card.addView(Ui.text(this, Ui.t("Первый запуск", "First launch"), 15, Ui.MUTED, false));
-        card.addView(Ui.text(this, Ui.t(
-                "Игре нужны файлы Minecraft 26.3. Они скачаются автоматически, около 700 МБ. Лучше подключиться к Wi-Fi.",
-                "The game needs the Minecraft 26.3 files. They will be downloaded automatically, about 700 MB. Wi-Fi is best."),
-                15, Ui.TEXT, false), Ui.gap(this, 12));
+        card.addView(Ui.text(this, "Horizon", 32, Ui.TEXT, true));
+        card.addView(Ui.text(this, "Minecraft Java Edition 26.3 • v" + APP_VERSION, 14, Ui.MUTED, false));
+
+        statusText = Ui.text(this, "", 15, Ui.TEXT, true);
+        card.addView(statusText, Ui.gap(this, 12));
+
         note = Ui.text(this, "", 14, Ui.WARN, false);
         note.setVisibility(View.GONE);
         card.addView(note, Ui.gap(this, 8));
-        button = Ui.button(this, Ui.t("Скачать файлы игры", "Download game files"), true);
-        button.setOnClickListener(this);
-        card.addView(button, Ui.gap(this, 18));
+
+        // Primary Play button
+        btnPlay = Ui.button(this, Ui.t("▶ Запустить игру", "▶ Play Game"), true);
+        btnPlay.setOnClickListener(this);
+        card.addView(btnPlay, Ui.gap(this, 14));
+
+        // Unpack derived pack button (if horizon-derived.zip exists)
+        btnUnpackDerived = Ui.button(this, Ui.t("📦 Распаковать horizon-derived.zip", "📦 Unpack horizon-derived.zip"), false);
+        btnUnpackDerived.setOnClickListener(this);
+        card.addView(btnUnpackDerived, Ui.gap(this, 10));
+
+        // Download / Reinstall resources button
+        btnDownload = Ui.button(this, Ui.t("⚙ Установка и обновление файлов (~700 МБ)", "⚙ Setup & Download game files (~700 MB)"), false);
+        btnDownload.setOnClickListener(this);
+        card.addView(btnDownload, Ui.gap(this, 10));
+
+        // Profile button
+        btnProfile = Ui.button(this, Ui.t("👤 Профиль: ник и скин", "👤 Profile: Name & Skin"), false);
+        btnProfile.setOnClickListener(this);
+        card.addView(btnProfile, Ui.gap(this, 10));
+
+        // Force launch button (shown on error or partial resources)
+        btnForce = Ui.button(this, Ui.t("🚀 Принудительный запуск", "🚀 Force Launch"), false);
+        btnForce.setOnClickListener(this);
+        btnForce.setVisibility(View.GONE);
+        card.addView(btnForce, Ui.gap(this, 10));
+
+        // Progress bar
         bar = new Ui.Bar(this);
         bar.setVisibility(View.GONE);
-        card.addView(bar, Ui.gap(this, 18));
+        card.addView(bar, Ui.gap(this, 16));
+
         stage = Ui.text(this, "", 15, Ui.TEXT, true);
+        stage.setVisibility(View.GONE);
         card.addView(stage, Ui.gap(this, 6));
+
         detail = Ui.text(this, "", 13, Ui.MUTED, false);
+        detail.setVisibility(View.GONE);
         card.addView(detail);
-        profile = Ui.button(this, Ui.t("Профиль: ник и скин", "Profile: name and skin"), false);
-        profile.setOnClickListener(this);
-        card.addView(profile, Ui.gap(this, 14));
-        if (!haveDerived()) {
-            showNote(Ui.t(
-                    "В этой сборке нет адреса пакета данных Horizon. Положите horizon-derived.zip в папку игры (Android/data/dev.horizonlab.horizon/files) или установите сборку, где он указан.",
-                    "This build has no Horizon data pack address. Put horizon-derived.zip in the game folder (Android/data/dev.horizonlab.horizon/files) or install a build that has one."));
-        }
+
+        updateState();
+
         if (android.os.Build.VERSION.SDK_INT >= 33) {
             requestPermissions(new String[] {"android.permission.POST_NOTIFICATIONS"}, 1);
         }
@@ -99,16 +160,111 @@ public class SetupActivity extends Activity
         }
     }
 
+    @Override
+    protected void onResume() {
+        super.onResume();
+        Ui.hideSystemUi(this);
+        updateState();
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) Ui.hideSystemUi(this);
+    }
+
+    private void updateState() {
+        boolean ready = isReady();
+        boolean hasZip = new File(home, "horizon-derived.zip").isFile();
+
+        if (ready) {
+            statusText.setTextColor(Ui.GREEN);
+            statusText.setText(Ui.t("✅ Все ресурсы готовы к игре", "✅ All game resources are ready"));
+            btnPlay.setVisibility(View.VISIBLE);
+            btnPlay.setText(Ui.t("▶ Запустить игру", "▶ Play Game"));
+            btnDownload.setText(Ui.t("🔄 Переустановить / обновить ресурсы", "🔄 Reinstall / Update resources"));
+        } else {
+            statusText.setTextColor(Ui.TEXT);
+            statusText.setText(Ui.t("ℹ️ Требуется установка ресурсов Minecraft 26.3", "ℹ️ Minecraft 26.3 resources setup required"));
+            btnPlay.setVisibility(View.GONE);
+            btnDownload.setText(Ui.t("📥 Скачать ресурсы игры (~700 МБ)", "📥 Download game files (~700 MB)"));
+        }
+
+        btnUnpackDerived.setVisibility(hasZip ? View.VISIBLE : View.GONE);
+    }
+
     private void showNote(String s) {
         note.setText(s);
         note.setVisibility(View.VISIBLE);
     }
 
     public void onClick(View v) {
-        if (v == profile) {
+        if (v == btnProfile) {
             startActivity(new Intent(this, ProfileActivity.class));
-        } else {
+        } else if (v == btnPlay || v == btnForce) {
+            clearIncompleteFlag();
+            launch();
+        } else if (v == btnUnpackDerived) {
+            unpackDerived();
+        } else if (v == btnDownload) {
             confirm();
+        }
+    }
+
+    private void unpackDerived() {
+        File zip = new File(home, "horizon-derived.zip");
+        if (!zip.isFile()) {
+            showNote(Ui.t("Файл horizon-derived.zip не найден в папке игры.", "horizon-derived.zip not found in game folder."));
+            return;
+        }
+        bar.setVisibility(View.VISIBLE);
+        stage.setVisibility(View.VISIBLE);
+        detail.setVisibility(View.VISIBLE);
+        stage.setText(Ui.t("Распаковка horizon-derived.zip...", "Unpacking horizon-derived.zip..."));
+        new Thread(() -> {
+            File resDir = new File(home, "resources");
+            resDir.mkdirs();
+            boolean ok = unpack(zip, resDir);
+            runOnUiThread(() -> {
+                bar.setVisibility(View.GONE);
+                stage.setVisibility(View.GONE);
+                detail.setVisibility(View.GONE);
+                if (ok) {
+                    clearIncompleteFlag();
+                    updateState();
+                    showNote(Ui.t("Ресурсы успешно распакованы!", "Resources unpacked successfully!"));
+                } else {
+                    showNote(Ui.t("Ошибка при распаковке архива.", "Error unpacking zip file."));
+                }
+            });
+        }).start();
+    }
+
+    private boolean unpack(File zipFile, File targetDir) {
+        byte[] buf = new byte[65536];
+        try (ZipInputStream zis = new ZipInputStream(new FileInputStream(zipFile))) {
+            ZipEntry ze;
+            while ((ze = zis.getNextEntry()) != null) {
+                String name = ze.getName();
+                if (name.contains("..")) continue;
+                File out = new File(targetDir, name);
+                if (ze.isDirectory()) {
+                    out.mkdirs();
+                } else {
+                    File p = out.getParentFile();
+                    if (p != null) p.mkdirs();
+                    try (FileOutputStream fos = new FileOutputStream(out)) {
+                        int len;
+                        while ((len = zis.read(buf)) > 0) {
+                            fos.write(buf, 0, len);
+                        }
+                    }
+                }
+                zis.closeEntry();
+            }
+            return true;
+        } catch (Exception e) {
+            return false;
         }
     }
 
@@ -119,16 +275,18 @@ public class SetupActivity extends Activity
     private void confirm() {
         StatFs fs = new StatFs(home);
         if (fs.getAvailableBytes() < NEED_BYTES) {
-            showNote(Ui.t("Мало места. Нужно около 1,5 ГБ, свободно ", "Not enough space. About 1.5 GB is needed, free: ")
+            showNote(Ui.t("Мало места. Нужно около 1.5 ГБ, свободно: ", "Not enough space. About 1.5 GB needed, free: ")
                     + (fs.getAvailableBytes() >> 20) + Ui.t(" МБ.", " MB."));
             return;
         }
-        ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
-        if (cm != null && cm.isActiveNetworkMetered()) {
+        ConnectivityManager cm = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+        boolean wifi = cm != null && cm.getNetworkCapabilities(cm.getActiveNetwork()) != null
+                && cm.getNetworkCapabilities(cm.getActiveNetwork())
+                        .hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI);
+        if (!wifi) {
             new AlertDialog.Builder(this)
-                    .setTitle(Ui.t("Мобильный интернет", "Mobile data"))
-                    .setMessage(Ui.t("Вы не подключены к Wi-Fi. Скачать около 700 МБ через мобильную сеть?",
-                            "You are not on Wi-Fi. Download about 700 MB over mobile data?"))
+                    .setTitle(Ui.t("Загрузка через мобильную сеть?", "Download over cellular?"))
+                    .setMessage(Ui.t("Будет скачано около 700 МБ. Продолжить?", "About 700 MB will be downloaded. Continue?"))
                     .setPositiveButton(Ui.t("Скачать", "Download"), this)
                     .setNegativeButton(Ui.t("Отмена", "Cancel"), null)
                     .show();
@@ -151,43 +309,43 @@ public class SetupActivity extends Activity
 
     private void running() {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        button.setEnabled(false);
-        button.setAlpha(0.5f);
+        btnDownload.setEnabled(false);
+        btnDownload.setAlpha(0.5f);
         bar.setVisibility(View.VISIBLE);
-        if (haveDerived()) note.setVisibility(View.GONE);
+        stage.setVisibility(View.VISIBLE);
+        detail.setVisibility(View.VISIBLE);
+        note.setVisibility(View.GONE);
         lastBytes = -1;
         handler.removeCallbacks(this);
         handler.post(this);
     }
 
     static String stageName(String s) {
-        if (s.equals("version") || s.equals("index")) return Ui.t("Подготовка", "Preparing");
-        if (s.equals("client")) return Ui.t("Скачивание игры", "Downloading the game");
-        if (s.equals("extract")) return Ui.t("Распаковка", "Unpacking");
-        if (s.equals("assets")) return Ui.t("Звуки, шрифты и языки", "Sounds, fonts and languages");
-        if (s.equals("derived")) return Ui.t("Данные Horizon", "Horizon data");
+        if (s.equals("version") || s.equals("index")) return Ui.t("Подготовка...", "Preparing...");
+        if (s.equals("client")) return Ui.t("Скачивание Minecraft...", "Downloading Minecraft...");
+        if (s.equals("extract")) return Ui.t("Распаковка...", "Unpacking...");
+        if (s.equals("assets")) return Ui.t("Звуки, шрифты и языки...", "Sounds, fonts and languages...");
+        if (s.equals("derived")) return Ui.t("Данные Horizon...", "Horizon data...");
         if (s.equals("done")) return Ui.t("Готово", "Ready");
-        return Ui.t("Подготовка", "Preparing");
+        return Ui.t("Подготовка...", "Preparing...");
     }
 
-    /** A message a player can act on, from the native error text. */
     static String friendlyError(String e) {
         if (e.startsWith("No derived pack")) {
-            return Ui.t("Не найден пакет данных Horizon. Положите horizon-derived.zip в папку игры и нажмите «Повторить».",
-                    "The Horizon data pack was not found. Put horizon-derived.zip in the game folder and tap Retry.");
+            return Ui.t("Не найден архив данных Horizon. Положите horizon-derived.zip в папку игры и нажмите «Распаковать».",
+                    "Horizon data pack was not found. Put horizon-derived.zip in the game folder and tap Unpack.");
         }
         if (e.contains("SHA-1")) {
-            return Ui.t("Файл скачался с ошибкой. Нажмите «Повторить».", "A file arrived damaged. Tap Retry.");
+            return Ui.t("Файл повреждён при передаче. Нажмите «Повторить».", "A file arrived damaged. Tap Retry.");
         }
         if (e.contains("Dns") || e.contains("onnect") || e.contains("timed out") || e.contains("Network")) {
-            return Ui.t("Нет связи с сервером. Проверьте интернет и нажмите «Повторить».",
-                    "Could not reach the server. Check the connection and tap Retry.");
+            return Ui.t("Нет связи с сервером Mojang. Проверьте подключение к сети.",
+                    "Could not reach Mojang server. Check your network connection.");
         }
         if (e.contains("No space") || e.contains("ENOSPC")) {
-            return Ui.t("Закончилось место на телефоне.", "The phone ran out of space.");
+            return Ui.t("Недостаточно места на телефоне.", "Out of disk space.");
         }
-        return Ui.t("Что-то пошло не так. Нажмите «Повторить», загрузка продолжится с того же места.",
-                "Something went wrong. Tap Retry, the download continues where it stopped.");
+        return Ui.t("Произошла ошибка: " + e, "Error: " + e);
     }
 
     public void run() {
@@ -210,7 +368,7 @@ public class SetupActivity extends Activity
         if (bytesTotal > 0) {
             permille = (int) (1000 * bytes / Math.max(1, bytesTotal));
             line = (bytes >> 20) + " / " + (bytesTotal >> 20) + Ui.t(" МБ", " MB");
-            if (speed > 1024) line += "  ·  " + String.format(java.util.Locale.ROOT, "%.1f", speed / 1048576) + Ui.t(" МБ/с", " MB/s");
+            if (speed > 1024) line += "  •  " + String.format(java.util.Locale.ROOT, "%.1f", speed / 1048576) + Ui.t(" МБ/с", " MB/s");
         } else if (filesTotal > 0) {
             permille = (int) (1000 * files / Math.max(1, filesTotal));
             line = files + " / " + filesTotal + Ui.t(" файлов", " files");
@@ -220,17 +378,19 @@ public class SetupActivity extends Activity
         detail.setText(line);
         if (p[5].equals("done")) {
             getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            clearIncompleteFlag();
+            updateState();
             launch();
             return;
         }
         if (p[5].equals("error")) {
             getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-            stage.setText(Ui.t("Загрузка остановилась", "The download stopped"));
-            detail.setText("");
+            stage.setText(Ui.t("Загрузка остановлена", "Download stopped"));
             showNote(friendlyError(p[6]));
-            button.setText(Ui.t("Повторить", "Retry"));
-            button.setEnabled(true);
-            button.setAlpha(1f);
+            btnDownload.setText(Ui.t("Повторить загрузку", "Retry download"));
+            btnDownload.setEnabled(true);
+            btnDownload.setAlpha(1f);
+            btnForce.setVisibility(View.VISIBLE);
             return;
         }
         handler.postDelayed(this, 500);

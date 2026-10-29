@@ -23,9 +23,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 
 /**
- * Name and skin. The name goes to horizon-player.txt (offline_name.rs: the name
- * used on servers and LAN); the skin, a 64x64 or 64x32 PNG picked with the system file
- * picker, to horizon-skin.png, and its arm model to horizon-skin.txt (game/local_skin.rs).
+ * Name and skin profile screen.
  */
 public class ProfileActivity extends Activity implements View.OnClickListener {
     private static final int PICK = 7;
@@ -39,10 +37,11 @@ public class ProfileActivity extends Activity implements View.OnClickListener {
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+        Ui.hideSystemUi(this);
         dir = new File(SetupActivity.home(this));
         LinearLayout card = Ui.card(this);
         card.addView(Ui.text(this, Ui.t("Профиль", "Profile"), 26, Ui.TEXT, true));
-        card.addView(Ui.text(this, Ui.t("Ник", "Name"), 14, Ui.MUTED, false), Ui.gap(this, 10));
+        card.addView(Ui.text(this, Ui.t("Имя игрока (ник)", "Player Name"), 14, Ui.MUTED, false), Ui.gap(this, 10));
         name = new EditText(this);
         name.setSingleLine(true);
         name.setTextColor(Ui.TEXT);
@@ -54,7 +53,7 @@ public class ProfileActivity extends Activity implements View.OnClickListener {
         name.setBackground(Ui.rounded(this, android.graphics.Color.rgb(24, 24, 30), Ui.EDGE, 8));
         name.setText(readName());
         card.addView(name);
-        card.addView(Ui.text(this, Ui.t("3–16 символов: латиница, цифры, _", "3–16 characters: letters, digits, _"),
+        card.addView(Ui.text(this, Ui.t("3-16 символов: буквы, цифры, _", "3-16 characters: letters, digits, _"),
                 12, Ui.MUTED, false));
         card.addView(Ui.text(this, Ui.t("Скин", "Skin"), 14, Ui.MUTED, false), Ui.gap(this, 14));
         preview = new ImageView(this);
@@ -81,13 +80,24 @@ public class ProfileActivity extends Activity implements View.OnClickListener {
         showPreview();
     }
 
+    @Override
+    protected void onResume() {
+        super.onResume();
+        Ui.hideSystemUi(this);
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) Ui.hideSystemUi(this);
+    }
+
     private String readName() {
         try {
             for (String l : new String(Files.readAllBytes(new File(dir, "horizon-player.txt").toPath()), StandardCharsets.UTF_8).split("\n")) {
                 if (l.startsWith("name:")) return l.substring(5).trim();
             }
-        } catch (Exception e) {
-            // No name yet: the game makes one.
+        } catch (Exception ignored) {
         }
         return "";
     }
@@ -95,7 +105,7 @@ public class ProfileActivity extends Activity implements View.OnClickListener {
     private boolean readModel() {
         try {
             return new String(Files.readAllBytes(new File(dir, "horizon-skin.txt").toPath()), StandardCharsets.UTF_8).contains("model:slim");
-        } catch (Exception e) {
+        } catch (Exception ignored) {
             return false;
         }
     }
@@ -120,14 +130,14 @@ public class ProfileActivity extends Activity implements View.OnClickListener {
         } else if (v == save) {
             String n = name.getText().toString().trim();
             if (!validName(n)) {
-                message.setText(Ui.t("Ник: 3–16 символов, только латиница, цифры и _.", "Name: 3–16 characters, letters, digits and _ only."));
+                message.setText(Ui.t("Имя: 3-16 символов, только латиница, цифры и _.", "Name: 3-16 characters, letters, digits and _ only."));
                 return;
             }
             try {
                 write(new File(dir, "horizon-player.txt"), ("name:" + n + "\n").getBytes(StandardCharsets.UTF_8));
                 write(new File(dir, "horizon-skin.txt"), ("model:" + (slim ? "slim" : "classic") + "\n").getBytes(StandardCharsets.UTF_8));
                 message.setTextColor(Ui.GREEN);
-                message.setText(Ui.t("Сохранено. Скин сменится сразу, ник — на серверах после перезапуска.",
+                message.setText(Ui.t("Сохранено. Скин изменится сразу, имя на серверах — после перезапуска.",
                         "Saved. The skin changes right away, the name on servers after a restart."));
             } catch (Exception e) {
                 message.setText(Ui.t("Не удалось сохранить.", "Could not save."));
@@ -156,7 +166,7 @@ public class ProfileActivity extends Activity implements View.OnClickListener {
             BitmapFactory.decodeByteArray(png, 0, png.length, o);
             boolean isPng = png.length > 8 && (png[0] & 0xFF) == 0x89 && png[1] == 'P' && png[2] == 'N' && png[3] == 'G';
             if (!isPng || o.outWidth != 64 || (o.outHeight != 64 && o.outHeight != 32)) {
-                message.setText(Ui.t("Нужен PNG 64×64 или 64×32.", "A 64×64 or 64×32 PNG is needed."));
+                message.setText(Ui.t("Нужен PNG-файл 64x64 или 64x32.", "A 64x64 or 64x32 PNG is needed."));
                 return;
             }
             write(new File(dir, "horizon-skin.png"), png);
@@ -164,7 +174,7 @@ public class ProfileActivity extends Activity implements View.OnClickListener {
             message.setText(Ui.t("Скин выбран.", "Skin chosen."));
             showPreview();
         } catch (Exception e) {
-            message.setText(Ui.t("Не удалось прочитать файл.", "Could not read the file."));
+            message.setText(Ui.t("Не удалось прочитать файл скина.", "Could not read the file."));
         }
     }
 
@@ -176,7 +186,6 @@ public class ProfileActivity extends Activity implements View.OnClickListener {
         if (!tmp.renameTo(f)) throw new Exception("rename");
     }
 
-    /** The skin's front, flat: head, body, arms and legs (a 16x32 figure). */
     private void showPreview() {
         File f = new File(dir, "horizon-skin.png");
         Bitmap skin = f.isFile() ? BitmapFactory.decodeFile(f.getPath()) : null;

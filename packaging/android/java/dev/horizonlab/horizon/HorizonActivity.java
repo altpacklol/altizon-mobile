@@ -8,14 +8,14 @@ import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.WindowManager;
 import android.view.inputmethod.BaseInputConnection;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
 
 /**
- * NativeActivity plus a text bridge and mouse pointer capture for FPS controls.
+ * NativeActivity plus a text bridge, mouse pointer capture for FPS controls,
+ * and full-screen sticky immersive mode to prevent accidental navigation gestures.
  */
 public class HorizonActivity extends NativeActivity {
     static {
@@ -31,21 +31,25 @@ public class HorizonActivity extends NativeActivity {
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
-        if (android.os.Build.VERSION.SDK_INT >= 28) {
-            WindowManager.LayoutParams lp = getWindow().getAttributes();
-            lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
-            getWindow().setAttributes(lp);
-        }
+        Ui.hideSystemUi(this);
         sink = new TextSink(this);
         addContentView(sink, new ViewGroup.LayoutParams(1, 1));
     }
 
-    // === Захват мыши для управления камерой ===
+    @Override
+    protected void onResume() {
+        super.onResume();
+        Ui.hideSystemUi(this);
+    }
+
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
-        if (hasFocus && android.os.Build.VERSION.SDK_INT >= 26) {
-            getWindow().getDecorView().requestPointerCapture();
+        if (hasFocus) {
+            Ui.hideSystemUi(this);
+            if (android.os.Build.VERSION.SDK_INT >= 26) {
+                getWindow().getDecorView().requestPointerCapture();
+            }
         }
     }
 
@@ -56,7 +60,6 @@ public class HorizonActivity extends NativeActivity {
         }
         return super.onTouchEvent(event);
     }
-    // ===========================================
 
     /** Called from the game thread: the profile screen (name, skin). */
     public void openProfile() {
@@ -79,18 +82,18 @@ public class HorizonActivity extends NativeActivity {
 
         public void run() {
             TextSink sink = a.sink;
-            {
-                InputMethodManager imm = (InputMethodManager) a.getSystemService(Context.INPUT_METHOD_SERVICE);
-                if (show) {
-                    sink.setFocusable(true);
-                    sink.setFocusableInTouchMode(true);
-                    sink.requestFocus();
-                    imm.restartInput(sink);
-                    imm.showSoftInput(sink, InputMethodManager.SHOW_FORCED);
-                } else {
-                    imm.hideSoftInputFromWindow(sink.getWindowToken(), 0);
-                    sink.clearFocus();
-                }
+            if (sink == null) return;
+            InputMethodManager imm = (InputMethodManager) a.getSystemService(Context.INPUT_METHOD_SERVICE);
+            if (imm == null) return;
+            if (show) {
+                sink.setFocusable(true);
+                sink.setFocusableInTouchMode(true);
+                sink.requestFocus();
+                imm.restartInput(sink);
+                imm.showSoftInput(sink, InputMethodManager.SHOW_FORCED);
+            } else {
+                imm.hideSoftInputFromWindow(sink.getWindowToken(), 0);
+                sink.clearFocus();
             }
         }
     }
@@ -123,7 +126,7 @@ public class HorizonActivity extends NativeActivity {
         }
 
         @Override
-        public boolean  commitText(CharSequence text, int pos) {
+        public boolean commitText(CharSequence text, int pos) {
             composing = "";
             if (text.length() > 0) nativeText(text.toString());
             return true;

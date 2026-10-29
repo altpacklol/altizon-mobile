@@ -14,9 +14,7 @@ import android.os.IBinder;
 import android.os.PowerManager;
 
 /**
- * Keeps the first-run download going with the app in the background or the screen off: a
- * dataSync foreground service with a progress notification. The work itself is native
- * (android_setup.rs, started by SetupActivity.nativeStart); this only holds the process up.
+ * Keeps the first-run download going with the app in the background or the screen off.
  */
 public class SetupService extends Service implements Runnable {
     static final String CHANNEL = "setup";
@@ -39,7 +37,7 @@ public class SetupService extends Service implements Runnable {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        Notification n = build(Ui.t("Подготовка", "Preparing"), 0, true, true);
+        Notification n = build(Ui.t("Подготовка...", "Preparing..."), 0, true, true);
         if (android.os.Build.VERSION.SDK_INT >= 29) {
             startForeground(ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
         } else {
